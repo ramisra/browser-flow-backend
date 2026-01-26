@@ -13,10 +13,7 @@ class Settings:
     """Application settings loaded from environment variables."""
 
     # Database configuration
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "postgresql+asyncpg://browserflow:Eureka4892@browser-flow.cqhkmq4wcsgm.us-east-1.rds.amazonaws.com:5432/postgres",
-    )
+    DATABASE_URL: str = os.environ["DATABASE_URL"]
 
     # OpenAI configuration
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
