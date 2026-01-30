@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.composio_trello import create_trello_task_from_actions_result
 from app.core.task_types import TaskType
 from app.core.tool_registry import ToolRegistry
 from app.core.url_actions import run_url_action_agent
@@ -15,10 +14,12 @@ from app.db.session import get_async_session
 from app.models.user_context import ContextType
 from app.repositories.user_context_repository import UserContextRepository
 from app.repositories.user_task_repository import UserTaskRepository
+from app.models.task_identification import TaskIdentificationResult
 from app.services.embedding import EmbeddingService
 from app.services.intent_understanding import IntentUnderstandingService
 from app.services.parent_topic_mapper import ParentTopicMapper
 from app.services.requirement_extractor import RequirementExtractor
+from app.services.task_identification import TaskIdentificationService
 from app.services.task_executor import TaskExecutor
 from app.services.workflow_orchestrator import WorkflowOrchestrator
 
@@ -74,6 +75,7 @@ class TaskResponse(BaseModel):
     context_result: Optional[Dict[str, Any]] = None
     actions_result: Optional[Dict[str, Any]] = None
     trello_metadata: Optional[str] = None
+    task_identification: Optional[TaskIdentificationResult] = None
     # New fields for intent-to-output orchestration
     detected_intent: Optional[Dict[str, Any]] = None
     workflow_plan: Optional[Dict[str, Any]] = None
@@ -184,11 +186,12 @@ async def _handle_auto_intent_detection(
         )
 
     # Initialize orchestration services
-    intent_service = IntentUnderstandingService()
-    requirement_extractor = RequirementExtractor()
+    task_identification_service = TaskIdentificationService()
+    # intent_service = IntentUnderstandingService()
+    # requirement_extractor = RequirementExtractor()
     tool_registry = ToolRegistry()
-    workflow_orchestrator = WorkflowOrchestrator(tool_registry)
-    task_executor = TaskExecutor(tool_registry)
+    # workflow_orchestrator = WorkflowOrchestrator(tool_registry)
+    # task_executor = TaskExecutor(tool_registry)
 
     # Step 1: Understand intent
     context_metadata = {
@@ -201,63 +204,70 @@ async def _handle_auto_intent_detection(
             if contexts:
                 context_metadata["tags"] = contexts[0].get("tags", [])
 
-    intent = await intent_service.understand_intent(
+    # Identify task type from context
+    print(f"User context text: {user_context_text}", "context_metadata: {context_metadata}")
+    task_identification = await task_identification_service.identify_task_type(
         user_context_text, context_metadata
     )
+    print(f"Task identification: {task_identification}")
+    # intent = await intent_service.understand_intent(
+    #     user_context_text, context_metadata
+    # )
 
-    # Step 2: Extract requirements
-    requirements = await requirement_extractor.extract_requirements(
-        user_context_text, intent, context_metadata
-    )
+    # # Step 2: Extract requirements
+    # requirements = await requirement_extractor.extract_requirements(
+    #     user_context_text, intent, context_metadata
+    # )
 
-    # Step 3: Create workflow plan
-    workflow_plan = await workflow_orchestrator.create_workflow_plan(
-        intent, requirements, user_context_text
-    )
+    # # Step 3: Create workflow plan
+    # workflow_plan = await workflow_orchestrator.create_workflow_plan(
+    #     intent, requirements, user_context_text
+    # )
 
     # Step 4: Execute workflow
-    context_data = {
-        "user_context": user_context_text,
-        "urls": request.urls or [],
-        "intent": intent.model_dump(),
-        "requirements": requirements.model_dump(),
-    }
-    execution_result = await task_executor.execute_workflow(
-        workflow_plan, context_data
-    )
+    # context_data = {
+    #     "user_context": user_context_text,
+    #     "urls": request.urls or [],
+    #     "intent": intent.model_dump(),
+    #     "requirements": requirements.model_dump(),
+    # }
+    # execution_result = await task_executor.execute_workflow(
+    #     workflow_plan, context_data
+    # )
 
-    # Step 5: Prepare task data
-    input_data: Dict[str, Any] = {
-        "workflow_tools": request.workflow_tools or [],
-        "user_context": user_context_text,
-        "urls": request.urls or [],
-        "auto_detected": True,
-    }
+    # # Step 5: Prepare task data
+    # input_data: Dict[str, Any] = {
+    #     "workflow_tools": request.workflow_tools or [],
+    #     "user_context": user_context_text,
+    #     "urls": request.urls or [],
+    #     "auto_detected": True,
+    # }
 
-    output_data: Dict[str, Any] = {
-        "execution_result": execution_result,
-        "response_tokens": str(execution_result),
-        "response_file": "",
-        "response_image": "",
-    }
+    # output_data: Dict[str, Any] = {
+    #     "execution_result": execution_result,
+    #     "response_tokens": str(execution_result),
+    #     "response_file": "",
+    #     "response_image": "",
+    #     "task_identification": task_identification.model_dump(),
+    # }
 
     # Step 6: Save task to database
-    # Use ADD_TO_CONTEXT as default task type for auto-detected tasks
-    task_type = request.task_type or TaskType.ADD_TO_CONTEXT
+    # Use identified task type for auto-detected tasks
+    task_type = task_identification.task_type
     
     user_task = await task_repo.create_user_task(
         task_type=task_type,
         user_guest_id=user_guest_id,
-        input_data=input_data,
+        input_data={},
         user_contexts=context_ids,
-        output_data=output_data,
+        output_data={},
     )
 
     # Update task with intent and workflow plan
     try:
-        user_task.detected_intent = intent.model_dump()
-        user_task.workflow_plan = workflow_plan.model_dump()
-        user_task.execution_status = execution_result.get("status", "PENDING")
+        # user_task.detected_intent = intent.model_dump()
+        # user_task.workflow_plan = workflow_plan.model_dump()
+        # user_task.execution_status = execution_result.get("status", "PENDING")
 
         # Flush to ensure fields are saved before commit
         await session.flush()
@@ -276,10 +286,11 @@ async def _handle_auto_intent_detection(
         task_type=task_type,
         context_ids=[str(cid) for cid in context_ids],
         context_result=context_result,
-        detected_intent=intent.model_dump(),
-        workflow_plan=workflow_plan.model_dump(),
-        execution_result=execution_result,
-        execution_status=execution_result.get("status", "PENDING"),
+        task_identification=task_identification,
+        detected_intent= {},
+        workflow_plan={},
+        execution_result={},
+        execution_status="PENDING",
     )
 
 
@@ -315,79 +326,85 @@ async def initiate_task(
     task_repo = UserTaskRepository(session)
 
     context_ids: List[uuid.UUID] = []
+    context_result: Optional[Dict[str, Any]] = None
+
+    if request.selected_text or request.user_context:
+        context_result = {"content": request.selected_text or request.user_context}
+    elif request.urls:
+        context_result = {"urls": request.urls}
 
     # Process context
-    context_result = await run_url_context_agent(
-        urls=request.urls, context=request.selected_text or request.user_context
-    )
+    # context_result = await run_url_context_agent(
+    #     urls=request.urls, context=request.selected_text or request.user_context
+    # )
 
     # Save context(s) to database
-    if context_result:
+    # if context_result:
         # The context_result should now be a dict with "contexts" key containing a list
         # Each context has: url, title, tags, content, short_summary
-        contexts_to_save = []
+        # contexts_to_save = []
         
-        if isinstance(context_result, dict):
-            # Check if it's the new format with "contexts" key
-            if "contexts" in context_result:
-                contexts_to_save = context_result["contexts"]
-            # Fallback: if it's a single context object
-            elif "content" in context_result or "tags" in context_result:
-                contexts_to_save = [context_result]
-        elif isinstance(context_result, list):
-            # If it's already a list
-            contexts_to_save = context_result
+        # if isinstance(context_result, dict):
+        #     # Check if it's the new format with "contexts" key
+        #     if "contexts" in context_result:
+        #         contexts_to_save = context_result["contexts"]
+        #     # Fallback: if it's a single context object
+        #     elif "content" in context_result or "tags" in context_result:
+        #         contexts_to_save = [context_result]
+        # elif isinstance(context_result, list):
+        #     # If it's already a list
+        #     contexts_to_save = context_result
 
-        # Process each context and save to database
-        for ctx in contexts_to_save:
-            if not isinstance(ctx, dict):
-                continue
+        # # Process each context and save to database
+        # for ctx in contexts_to_save:
+        #     if not isinstance(ctx, dict):
+        #         continue
                 
-            url = ctx.get("url")
-            tags = ctx.get("tags", [])
-            content = ctx.get("content") or ctx.get("raw_content", "")
-            user_defined_context = ctx.get("short_summary") or ctx.get("title")
+        #     url = ctx.get("url")
+        #     tags = ctx.get("tags", [])
+        #     content = ctx.get("content") or ctx.get("raw_content", "")
+        #     user_defined_context = ctx.get("short_summary") or ctx.get("title")
             
-            # Skip if no content
-            if not content:
-                continue
+        #     # Skip if no content
+        #     if not content:
+        #         continue
 
-            # Determine context type (simplified - could be enhanced)
-            context_type = ContextType.TEXT
-            if url:
-                url_lower = url.lower()
-                if any(ext in url_lower for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"]):
-                    context_type = ContextType.IMAGE
-                elif any(ext in url_lower for ext in [".mp4", ".avi", ".mov", ".webm"]):
-                    context_type = ContextType.VIDEO
+        #     # Determine context type (simplified - could be enhanced)
+        #     context_type = ContextType.TEXT
+        #     if url:
+        #         url_lower = url.lower()
+        #         if any(ext in url_lower for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"]):
+        #             context_type = ContextType.IMAGE
+        #         elif any(ext in url_lower for ext in [".mp4", ".avi", ".mov", ".webm"]):
+        #             context_type = ContextType.VIDEO
 
-            try:
-                # Create user context in database
-                user_context = await context_repo.create_user_context(
-                    raw_content=content,
-                    context_tags=tags,
-                    user_guest_id=user_guest_id,
-                    url=url,
-                    user_defined_context=user_defined_context,
-                    context_type=context_type,
-                    find_parent=True,
-                )
-                context_ids.append(user_context.context_id)
-            except Exception as e:
-                print(f"Error saving context to database: {e}")
-                # Rollback the session to clear any pending transaction state
-                await session.rollback()
-                # Continue with other contexts even if one fails
-                continue
+        #     try:
+        #         # Create user context in database
+        #         user_context = await context_repo.create_user_context(
+        #             raw_content=content,
+        #             context_tags=tags,
+        #             user_guest_id=user_guest_id,
+        #             url=url,
+        #             user_defined_context=user_defined_context,
+        #             context_type=context_type,
+        #             find_parent=True,
+        #         )
+        #         context_ids.append(user_context.context_id)
+        #     except Exception as e:
+        #         print(f"Error saving context to database: {e}")
+        #         # Rollback the session to clear any pending transaction state
+        #         await session.rollback()
+        #         # Continue with other contexts even if one fails
+        #         continue
 
-        # Commit all contexts at once
-        if context_ids:
-            try:
-                await session.commit()
-                print(f"Successfully saved {len(context_ids)} context(s) to database")
-            except Exception as e:
-                print(f"Error committing contexts to database: {e}")
-                await session.rollback()
+        # # Commit all contexts at once
+        # if context_ids:
+        #     try:
+        #         await session.commit()
+        #         print(f"Successfully saved {len(context_ids)} context(s) to database")
+        #     except Exception as e:
+        #         print(f"Error committing contexts to database: {e}")
+        #         await session.rollback()
 
     # Handle automatic intent detection if enabled or task_type is not provided
     if request.auto_detect_intent or request.task_type is None:
@@ -395,14 +412,14 @@ async def initiate_task(
             request=request,
             user_guest_id=user_guest_id,
             session=session,
-            context_result=request.selected_text or request.user_context,
+            context_result=context_result,
             context_ids=context_ids,
             context_repo=context_repo,
             task_repo=task_repo,
         )
 
     # Handle different task types
-    if request.task_type == TaskType.ADD_TO_CONTEXT:
+    if request.task_type == TaskType.ADD_TO_KNOWLEDGE_BASE:
         # Create task record for add_to_context as well
         input_data: Dict[str, Any] = {
             "workflow_tools": request.workflow_tools or [],
@@ -432,54 +449,54 @@ async def initiate_task(
             task_id=str(user_task.task_id),
             task_type=request.task_type,
             context_ids=[str(cid) for cid in context_ids],
-            context_result=context_result,
+            context_result="",
         )
 
-    if request.task_type == TaskType.CREATE_ACTION_FROM_CONTEXT:
-        actions_result = await run_url_action_agent(context=context_result)
+    # if request.task_type == TaskType.CREATE_ACTION_FROM_CONTEXT:
+    #     actions_result = await run_url_action_agent(context=context_result)
 
-        # Invoke Composio/Trello integration using the first task and its subtasks.
-        trello_metadata = ""
-        if actions_result:
-            try:
-                await create_trello_task_from_actions_result(actions_result)
-                trello_metadata = "Trello task created successfully"
-            except Exception as e:
-                trello_metadata = f"Trello task creation failed: {str(e)}"
+    #     # Invoke Composio/Trello integration using the first task and its subtasks.
+    #     trello_metadata = ""
+    #     if actions_result:
+    #         try:
+    #             await create_trello_task_from_actions_result(actions_result)
+    #             trello_metadata = "Trello task created successfully"
+    #         except Exception as e:
+    #             trello_metadata = f"Trello task creation failed: {str(e)}"
 
-        # Prepare input data
-        input_data: Dict[str, Any] = {
-            "workflow_tools": request.workflow_tools or [],
-            "user_context": request.user_context or request.selected_text or "",
-        }
+    #     # Prepare input data
+    #     input_data: Dict[str, Any] = {
+    #         "workflow_tools": request.workflow_tools or [],
+    #         "user_context": request.user_context or request.selected_text or "",
+    #     }
 
-        # Prepare output data
-        output_data: Dict[str, Any] = {
-            "response_tokens": str(actions_result) if actions_result else "",
-            "response_file": "",
-            "response_image": "",
-        }
+    #     # Prepare output data
+    #     output_data: Dict[str, Any] = {
+    #         "response_tokens": str(actions_result) if actions_result else "",
+    #         "response_file": "",
+    #         "response_image": "",
+    #     }
 
-        # Create task in database
-        user_task = await task_repo.create_user_task(
-            task_type=request.task_type,
-            user_guest_id=user_guest_id,
-            input_data=input_data,
-            user_contexts=context_ids,
-            output_data=output_data,
-        )
+    #     # Create task in database
+    #     user_task = await task_repo.create_user_task(
+    #         task_type=request.task_type,
+    #         user_guest_id=user_guest_id,
+    #         input_data=input_data,
+    #         user_contexts=context_ids,
+    #         output_data=output_data,
+    #     )
 
-        # Commit task
-        await session.commit()
+    #     # Commit task
+    #     await session.commit()
 
-        return TaskResponse(
-            task_id=str(user_task.task_id),
-            task_type=request.task_type,
-            context_ids=[str(cid) for cid in context_ids],
-            context_result=context_result,
-            actions_result=actions_result,
-            trello_metadata=trello_metadata,
-        )
+    #     return TaskResponse(
+    #         task_id=str(user_task.task_id),
+    #         task_type=request.task_type,
+    #         context_ids=[str(cid) for cid in context_ids],
+    #         context_result= "",
+    #         actions_result=actions_result,
+    #         trello_metadata=trello_metadata,
+    #     )
 
     # This should be unreachable due to the enum type, but kept as a safeguard.
     raise HTTPException(
