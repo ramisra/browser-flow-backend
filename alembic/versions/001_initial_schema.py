@@ -24,24 +24,16 @@ def upgrade() -> None:
     # Note: pgvector must be installed in PostgreSQL first
     # For macOS: brew install pgvector
     # For other systems: follow pgvector installation instructions
-    # We'll create the extension in a separate transaction to avoid aborting the main migration
     from sqlalchemy import text
-    connection = op.get_bind()
     
-    # Check if vector extension exists
-    result = connection.execute(text("SELECT 1 FROM pg_available_extensions WHERE name = 'vector'"))
-    if result.fetchone():
-        try:
-            connection.execute(text('CREATE EXTENSION IF NOT EXISTS vector'))
-            connection.commit()
-        except Exception as e:
-            print(f"Warning: Could not create vector extension: {e}")
-            print("Please install pgvector extension in PostgreSQL to use vector features.")
-            connection.rollback()
-    else:
-        print("Warning: pgvector extension is not available in PostgreSQL.")
-        print("Please install pgvector extension to use vector features.")
-        print("For macOS: brew install pgvector")
+    # Check if vector extension exists and create it if available
+    # Use op.execute() instead of direct connection operations to work within Alembic's transaction
+    try:
+        op.execute(text('CREATE EXTENSION IF NOT EXISTS vector'))
+    except Exception as e:
+        print(f"Warning: Could not create vector extension: {e}")
+        print("Please install pgvector extension in PostgreSQL to use vector features.")
+        print("Migration will continue without vector support.")
     
     # Create user_contexts table
     op.create_table(

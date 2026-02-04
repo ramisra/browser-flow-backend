@@ -164,6 +164,106 @@ class ToolRegistry:
             )
         )
 
+        # Excel tools
+        self.register_tool(
+            ToolMetadata(
+                name="excel_write",
+                description="Write data to an Excel file",
+                parameters={
+                    "data": {"type": "array", "required": True},
+                    "columns": {"type": "array", "required": False},
+                    "file_name": {"type": "string", "required": False},
+                },
+                capabilities=["data_storage", "excel_writing", "data_extraction"],
+                supported_intents=[
+                    IntentCategory.DATA_COLLECTION,
+                    IntentCategory.INTEGRATION,
+                ],
+            )
+        )
+
+        self.register_tool(
+            ToolMetadata(
+                name="excel_append",
+                description="Append data to an existing Excel file",
+                parameters={
+                    "file_path": {"type": "string", "required": True},
+                    "data": {"type": "array", "required": True},
+                    "columns": {"type": "array", "required": False},
+                },
+                capabilities=["data_storage", "excel_writing"],
+                supported_intents=[
+                    IntentCategory.DATA_COLLECTION,
+                    IntentCategory.INTEGRATION,
+                ],
+            )
+        )
+
+        self.register_tool(
+            ToolMetadata(
+                name="excel_read",
+                description="Read data from an Excel file",
+                parameters={
+                    "file_path": {"type": "string", "required": True},
+                },
+                capabilities=["data_retrieval", "excel_reading"],
+                supported_intents=[
+                    IntentCategory.INFORMATION_RETRIEVAL,
+                    IntentCategory.DATA_COLLECTION,
+                ],
+            )
+        )
+
+        # Notion tools (custom MCP)
+        self.register_tool(
+            ToolMetadata(
+                name="notion_create_page",
+                description="Create a new page in Notion under a parent page. parent_page_id is optional (defaults to NOTION_PARENT_PAGE_ID from .env). Returns page_id and url.",
+                parameters={
+                    "parent_page_id": {"type": "string", "required": False},
+                    "title": {"type": "string", "required": True},
+                    "children": {"type": "array", "required": False},
+                },
+                capabilities=["note_creation", "notion", "content_creation"],
+                supported_intents=[
+                    IntentCategory.DOCUMENTATION,
+                    IntentCategory.DATA_COLLECTION,
+                ],
+            )
+        )
+        self.register_tool(
+            ToolMetadata(
+                name="notion_append_blocks",
+                description="Append blocks (paragraph, to_do, heading_1, etc.) to a Notion page. Returns page_id and block_ids.",
+                parameters={
+                    "page_id": {"type": "string", "required": True},
+                    "blocks": {"type": "array", "required": True},
+                    "position": {"type": "object", "required": False},
+                },
+                capabilities=["notion", "content_edit"],
+                supported_intents=[
+                    IntentCategory.DOCUMENTATION,
+                    IntentCategory.DATA_COLLECTION,
+                ],
+            )
+        )
+        self.register_tool(
+            ToolMetadata(
+                name="notion_search",
+                description="Search Notion by query. Returns results, most_relevant_page_id, most_relevant_url.",
+                parameters={
+                    "query": {"type": "string", "required": True},
+                    "filter": {"type": "object", "required": False},
+                    "sort": {"type": "object", "required": False},
+                },
+                capabilities=["notion", "search"],
+                supported_intents=[
+                    IntentCategory.DOCUMENTATION,
+                    IntentCategory.INFORMATION_RETRIEVAL,
+                ],
+            )
+        )
+
     def register_tool(self, tool: ToolMetadata):
         """Register a new tool.
 

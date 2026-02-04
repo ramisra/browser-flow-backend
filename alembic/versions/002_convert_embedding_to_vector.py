@@ -23,59 +23,45 @@ def upgrade() -> None:
     from sqlalchemy import text
     connection = op.get_bind()
     
-    # Check if vector extension exists and is enabled
-    result = connection.execute(text("SELECT 1 FROM pg_available_extensions WHERE name = 'vector'"))
-    if not result.fetchone():
-        print("Warning: pgvector extension is not available. Cannot convert embedding column.")
-        print("Please install pgvector extension in PostgreSQL first.")
-        # Migration will still be marked as complete even if we return early
-        return
-    
     # Ensure vector extension is enabled
     try:
         op.execute(text('CREATE EXTENSION IF NOT EXISTS vector'))
     except Exception as e:
         print(f"Warning: Could not enable vector extension: {e}")
-        # Migration will still be marked as complete even if we return early
-        return
+        print("Migration will continue, but embedding column conversion may fail.")
+        print("Please install pgvector extension in PostgreSQL first.")
     
     # Convert BYTEA column to vector(1536)
-    try:
-        # Check if column exists and is BYTEA
-        check_result = connection.execute(text("""
-            SELECT data_type 
-            FROM information_schema.columns 
-            WHERE table_name = 'user_contexts' 
-            AND column_name = 'embedding'
-        """))
-        row = check_result.fetchone()
-        
-        if row and row[0] == 'bytea':
-            # Alter the column type from BYTEA to vector(1536)
-            try:
-                op.execute(text("""
-                    ALTER TABLE user_contexts 
-                    ALTER COLUMN embedding TYPE vector(1536) 
-                    USING NULL
-                """))
-                print("Successfully converted embedding column to vector(1536)")
-            except Exception as conv_error:
-                # If that fails, try dropping and recreating
-                print(f"Direct conversion failed: {conv_error}, trying drop/recreate approach")
-                op.execute(text("ALTER TABLE user_contexts DROP COLUMN embedding"))
-                # Add column as vector type using raw SQL
-                op.execute(text("ALTER TABLE user_contexts ADD COLUMN embedding vector(1536)"))
-                print("Successfully recreated embedding column as vector(1536)")
-        elif row and row[0] == 'USER-DEFINED':
-            # Column might already be vector type (shows as USER-DEFINED in information_schema)
-            print("Embedding column appears to already be vector type")
-        else:
-            print(f"Warning: Embedding column type is {row[0] if row else 'unknown'}, skipping conversion")
-    except Exception as e:
-        print(f"Error converting embedding column: {e}")
-        print("You may need to manually alter the column:")
-        print("ALTER TABLE user_contexts ALTER COLUMN embedding TYPE vector(1536);")
-        raise  # Re-raise to let Alembic handle the transaction
+    # Check if column exists and is BYTEA
+    check_result = connection.execute(text("""
+        SELECT data_type 
+        FROM information_schema.columns 
+        WHERE table_name = 'user_contexts' 
+        AND column_name = 'embedding'
+    """))
+    row = check_result.fetchone()
+    
+    if row and row[0] == 'bytea':
+        # Alter the column type from BYTEA to vector(1536)
+        try:
+            op.execute(text("""
+                ALTER TABLE user_contexts 
+                ALTER COLUMN embedding TYPE vector(1536) 
+                USING NULL
+            """))
+            print("Successfully converted embedding column to vector(1536)")
+        except Exception as conv_error:
+            # If that fails, try dropping and recreating
+            print(f"Direct conversion failed: {conv_error}, trying drop/recreate approach")
+            op.execute(text("ALTER TABLE user_contexts DROP COLUMN embedding"))
+            # Add column as vector type using raw SQL
+            op.execute(text("ALTER TABLE user_contexts ADD COLUMN embedding vector(1536)"))
+            print("Successfully recreated embedding column as vector(1536)")
+    elif row and row[0] == 'USER-DEFINED':
+        # Column might already be vector type (shows as USER-DEFINED in information_schema)
+        print("Embedding column appears to already be vector type")
+    else:
+        print(f"Warning: Embedding column type is {row[0] if row else 'unknown'}, skipping conversion")
 
 
 def downgrade() -> None:

@@ -156,3 +156,69 @@ class UserContextRepository:
 
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def search_similar_contexts(
+        self,
+        query_embedding: List[float],
+        user_guest_id: Optional[uuid.UUID] = None,
+        limit: int = 5,
+    ) -> List[UserContext]:
+        """Search for similar contexts using vector similarity.
+
+        Args:
+            query_embedding: Query embedding vector
+            user_guest_id: Optional user guest ID to filter contexts
+            limit: Maximum number of results
+
+        Returns:
+            List of similar UserContext instances
+        """
+        from pgvector.sqlalchemy import Vector
+        from sqlalchemy import func, cast
+        from sqlalchemy.sql import func as sql_func
+
+        # Convert embedding to numpy array
+        embedding_array = np.array(query_embedding, dtype=np.float32)
+        if embedding_array.ndim != 1:
+            embedding_array = embedding_array.flatten()
+        embedding_array = np.ascontiguousarray(embedding_array, dtype=np.float32)
+
+        # Build query with cosine similarity using pgvector's cosine_distance
+        # Note: pgvector uses cosine_distance which returns 0 for identical vectors
+        # We use 1 - cosine_distance for similarity score
+        base_query = select(UserContext).where(
+            UserContext.embedding.isnot(None)
+        )
+
+        # Filter by user if provided
+        if user_guest_id:
+            base_query = base_query.where(UserContext.user_guest_id == user_guest_id)
+
+        # Use raw SQL for pgvector similarity search
+        # pgvector's cosine_distance function
+        similarity_expr = UserContext.embedding.cosine_distance(embedding_array)
+        # Convert distance to similarity (1 - distance)
+        similarity_score = (1 - similarity_expr).label("similarity_score")
+
+        query = select(UserContext, similarity_score).where(
+            UserContext.embedding.isnot(None)
+        )
+
+        if user_guest_id:
+            query = query.where(UserContext.user_guest_id == user_guest_id)
+
+        # Order by similarity (ascending distance = descending similarity)
+        query = query.order_by(similarity_expr).limit(limit)
+
+        result = await self.session.execute(query)
+        rows = result.all()
+
+        # Attach similarity score to contexts
+        contexts = []
+        for row in rows:
+            context = row[0]
+            if len(row) > 1:
+                context.similarity_score = float(row[1])
+            contexts.append(context)
+
+        return contexts

@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.task_types import TaskType
 from app.core.tool_registry import ToolRegistry
 from app.core.url_actions import run_url_action_agent
-from app.core.url_context import run_url_context_agent
 from app.db.session import get_async_session
 from app.models.user_context import ContextType
 from app.repositories.user_context_repository import UserContextRepository
@@ -22,6 +21,11 @@ from app.services.requirement_extractor import RequirementExtractor
 from app.services.task_identification import TaskIdentificationService
 from app.services.task_executor import TaskExecutor
 from app.services.workflow_orchestrator import WorkflowOrchestrator
+from app.services.task_orchestrator import TaskOrchestrator
+from app.services.semantic_knowledge_service import SemanticKnowledgeService
+from app.core.agent_registry import AgentRegistry
+from app.core.agents.agent_spawner import AgentSpawner
+from app.core.tools.excel_tools import ExcelTools
 
 
 class TaskRequest(BaseModel):
@@ -29,8 +33,6 @@ class TaskRequest(BaseModel):
     urls: Optional[List[str]] = None
     selected_text: Optional[str] = None
     user_context: Optional[str] = None
-    workflow_tools: Optional[List[str]] = None
-    auto_detect_intent: bool = True  # Enable automatic intent detection
 
     @field_validator('task_type', mode='before')
     @classmethod
@@ -139,7 +141,7 @@ async def get_user_guest_id(
         )
 
 
-async def _handle_auto_intent_detection(
+async def _execute_task(
     request: TaskRequest,
     user_guest_id: uuid.UUID,
     session: AsyncSession,
@@ -162,24 +164,17 @@ async def _handle_auto_intent_detection(
     Returns:
         TaskResponse with execution results
     """
-    # Get user context text
-    user_context_text = request.user_context or request.selected_text or ""
-    
-    # Extract context from context_result if available
-    if context_result and isinstance(context_result, dict):
-        if "contexts" in context_result:
-            # Combine all context content
-            contexts = context_result.get("contexts", [])
-            if contexts:
-                user_context_text = "\n\n".join([
-                    ctx.get("content", ctx.get("raw_content", ""))
-                    for ctx in contexts
-                    if isinstance(ctx, dict)
-                ])
-        elif "content" in context_result:
-            user_context_text = context_result.get("content", user_context_text)
+    # Get user context text (selected_text or user_context for intent detection)
+    user_input = None
+    user_task_context = None
 
-    if not user_context_text:
+    if context_result and isinstance(context_result, dict):
+        user_task_context = context_result.get("user_task")
+        user_input = context_result.get("selected_text") or context_result.get(
+            "user_task"
+        )
+
+    if not user_input:
         raise HTTPException(
             status_code=400,
             detail="No context available for intent detection",
@@ -187,89 +182,96 @@ async def _handle_auto_intent_detection(
 
     # Initialize orchestration services
     task_identification_service = TaskIdentificationService()
-    # intent_service = IntentUnderstandingService()
-    # requirement_extractor = RequirementExtractor()
     tool_registry = ToolRegistry()
-    # workflow_orchestrator = WorkflowOrchestrator(tool_registry)
-    # task_executor = TaskExecutor(tool_registry)
 
     # Step 1: Understand intent
     context_metadata = {
         "urls": request.urls or [],
         "tags": [],
     }
-    if context_result and isinstance(context_result, dict):
-        if "contexts" in context_result:
-            contexts = context_result.get("contexts", [])
-            if contexts:
-                context_metadata["tags"] = contexts[0].get("tags", [])
 
     # Identify task type from context
-    print(f"User context text: {user_context_text}", "context_metadata: {context_metadata}")
     task_identification = await task_identification_service.identify_task_type(
-        user_context_text, context_metadata
+        user_task_context, context_metadata
     )
     print(f"Task identification: {task_identification}")
-    # intent = await intent_service.understand_intent(
-    #     user_context_text, context_metadata
-    # )
 
-    # # Step 2: Extract requirements
-    # requirements = await requirement_extractor.extract_requirements(
-    #     user_context_text, intent, context_metadata
-    # )
+    # NEW: Agent system initiation
+    execution_result = None
+    try:
+        # Initialize agent system components
+        agent_registry = AgentRegistry()
+        tool_registry = ToolRegistry()
+        embedding_service = EmbeddingService()
+        semantic_knowledge_service = SemanticKnowledgeService(
+            embedding_service=embedding_service,
+            context_repository=context_repo,
+        )
+        excel_tools = ExcelTools()
+        agent_spawner = AgentSpawner(
+            tool_registry=tool_registry,
+            embedding_service=None,
+            semantic_knowledge_service=semantic_knowledge_service,
+            excel_tools=excel_tools,
+        )
+        task_orchestrator = TaskOrchestrator(
+            agent_registry=agent_registry,
+            agent_spawner=agent_spawner,
+        )
 
-    # # Step 3: Create workflow plan
-    # workflow_plan = await workflow_orchestrator.create_workflow_plan(
-    #     intent, requirements, user_context_text
-    # )
+        # Prepare task input combining selected_text and user_context
+        task_input = {
+            "selected_text": request.selected_text,
+            "user_context": request.user_context or user_task_context,
+            "urls": request.urls or [],
+            "context_result": context_result,
+        }
 
-    # Step 4: Execute workflow
-    # context_data = {
-    #     "user_context": user_context_text,
-    #     "urls": request.urls or [],
-    #     "intent": intent.model_dump(),
-    #     "requirements": requirements.model_dump(),
-    # }
-    # execution_result = await task_executor.execute_workflow(
-    #     workflow_plan, context_data
-    # )
-
-    # # Step 5: Prepare task data
-    # input_data: Dict[str, Any] = {
-    #     "workflow_tools": request.workflow_tools or [],
-    #     "user_context": user_context_text,
-    #     "urls": request.urls or [],
-    #     "auto_detected": True,
-    # }
-
-    # output_data: Dict[str, Any] = {
-    #     "execution_result": execution_result,
-    #     "response_tokens": str(execution_result),
-    #     "response_file": "",
-    #     "response_image": "",
-    #     "task_identification": task_identification.model_dump(),
-    # }
+        # Execute agent orchestration
+        execution_result = await task_orchestrator.orchestrate_task(
+            task_identification=task_identification,
+            user_context=user_task_context,
+            context_metadata=context_metadata,
+            context_result=context_result,
+            task_input=task_input,
+            user_guest_id=str(user_guest_id),
+            context_ids=[str(cid) for cid in context_ids],
+        )
+        print(f"Agent execution result: {execution_result}")
+    except Exception as e:
+        print(f"Error in agent orchestration: {e}")
+        import traceback
+        traceback.print_exc()
 
     # Step 6: Save task to database
     # Use identified task type for auto-detected tasks
     task_type = task_identification.task_type
     
+    output_data = (
+        execution_result.agent_results.model_dump()
+        if execution_result and hasattr(execution_result, "agent_results")
+        else {}
+    )
+
     user_task = await task_repo.create_user_task(
         task_type=task_type,
         user_guest_id=user_guest_id,
-        input_data={},
+        input_data=task_identification.input.model_dump(),
         user_contexts=context_ids,
-        output_data={},
+        output_data=output_data,
     )
 
     # Update task with intent and workflow plan
     try:
-        # user_task.detected_intent = intent.model_dump()
-        # user_task.workflow_plan = workflow_plan.model_dump()
-        # user_task.execution_status = execution_result.get("status", "PENDING")
+        user_task.execution_status = (
+            execution_result.get("status", "PENDING")
+            if isinstance(execution_result, dict)
+            else (getattr(execution_result, "status", None) or "PENDING")
+            if execution_result
+            else "PENDING"
+        )
 
-        # Flush to ensure fields are saved before commit
+        #Flush to ensure fields are saved before commit
         await session.flush()
         await session.commit()
         await session.refresh(user_task)
@@ -279,18 +281,22 @@ async def _handle_auto_intent_detection(
         print(f"Error saving intent/workflow fields: {e}")
         # Still commit the task even if intent fields fail
         await session.commit()
-        await session.refresh(user_task)
+        await session.refresh(user_task)  # pyright: ignore[reportUndefinedVariable]
 
+    # Prepare execution result for response
+    execution_result_dict = {}
+    execution_status = "PENDING"
+    if execution_result:
+        execution_result_dict = execution_result.model_dump() if hasattr(execution_result, 'model_dump') else execution_result
+        execution_status = execution_result.status if hasattr(execution_result, 'status') else "COMPLETED"
     return TaskResponse(
-        task_id=str(user_task.task_id),
+        task_id=str(1),
         task_type=task_type,
         context_ids=[str(cid) for cid in context_ids],
         context_result=context_result,
         task_identification=task_identification,
-        detected_intent= {},
-        workflow_plan={},
-        execution_result={},
-        execution_status="PENDING",
+        execution_result=execution_result_dict,
+        execution_status=execution_status,
     )
 
 
@@ -312,9 +318,10 @@ async def initiate_task(
         2) Save context to database.
     """
 
-    if not request.selected_text and not request.urls:
+    if not request.selected_text and not request.user_context and not request.urls:
         raise HTTPException(
-            status_code=400, detail="Either urls or context must be provided"
+            status_code=400,
+            detail="At least one of urls, selected_text, or user_context must be provided",
         )
 
     # Initialize services
@@ -328,181 +335,85 @@ async def initiate_task(
     context_ids: List[uuid.UUID] = []
     context_result: Optional[Dict[str, Any]] = None
 
-    if request.selected_text or request.user_context:
-        context_result = {"content": request.selected_text or request.user_context}
-    elif request.urls:
-        context_result = {"urls": request.urls}
-
-    # Process context
-    # context_result = await run_url_context_agent(
-    #     urls=request.urls, context=request.selected_text or request.user_context
-    # )
-
-    # Save context(s) to database
-    # if context_result:
-        # The context_result should now be a dict with "contexts" key containing a list
-        # Each context has: url, title, tags, content, short_summary
-        # contexts_to_save = []
-        
-        # if isinstance(context_result, dict):
-        #     # Check if it's the new format with "contexts" key
-        #     if "contexts" in context_result:
-        #         contexts_to_save = context_result["contexts"]
-        #     # Fallback: if it's a single context object
-        #     elif "content" in context_result or "tags" in context_result:
-        #         contexts_to_save = [context_result]
-        # elif isinstance(context_result, list):
-        #     # If it's already a list
-        #     contexts_to_save = context_result
-
-        # # Process each context and save to database
-        # for ctx in contexts_to_save:
-        #     if not isinstance(ctx, dict):
-        #         continue
-                
-        #     url = ctx.get("url")
-        #     tags = ctx.get("tags", [])
-        #     content = ctx.get("content") or ctx.get("raw_content", "")
-        #     user_defined_context = ctx.get("short_summary") or ctx.get("title")
-            
-        #     # Skip if no content
-        #     if not content:
-        #         continue
-
-        #     # Determine context type (simplified - could be enhanced)
-        #     context_type = ContextType.TEXT
-        #     if url:
-        #         url_lower = url.lower()
-        #         if any(ext in url_lower for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"]):
-        #             context_type = ContextType.IMAGE
-        #         elif any(ext in url_lower for ext in [".mp4", ".avi", ".mov", ".webm"]):
-        #             context_type = ContextType.VIDEO
-
-        #     try:
-        #         # Create user context in database
-        #         user_context = await context_repo.create_user_context(
-        #             raw_content=content,
-        #             context_tags=tags,
-        #             user_guest_id=user_guest_id,
-        #             url=url,
-        #             user_defined_context=user_defined_context,
-        #             context_type=context_type,
-        #             find_parent=True,
-        #         )
-        #         context_ids.append(user_context.context_id)
-        #     except Exception as e:
-        #         print(f"Error saving context to database: {e}")
-        #         # Rollback the session to clear any pending transaction state
-        #         await session.rollback()
-        #         # Continue with other contexts even if one fails
-        #         continue
-
-        # # Commit all contexts at once
-        # if context_ids:
-        #     try:
-        #         await session.commit()
-        #         print(f"Successfully saved {len(context_ids)} context(s) to database")
-        #     except Exception as e:
-        #         print(f"Error committing contexts to database: {e}")
-        #         await session.rollback()
-
-    # Handle automatic intent detection if enabled or task_type is not provided
-    if request.auto_detect_intent or request.task_type is None:
-        return await _handle_auto_intent_detection(
-            request=request,
-            user_guest_id=user_guest_id,
-            session=session,
-            context_result=context_result,
-            context_ids=context_ids,
-            context_repo=context_repo,
-            task_repo=task_repo,
-        )
-
-    # Handle different task types
-    if request.task_type == TaskType.ADD_TO_KNOWLEDGE_BASE:
-        # Create task record for add_to_context as well
-        input_data: Dict[str, Any] = {
-            "workflow_tools": request.workflow_tools or [],
-            "user_context": request.user_context or request.selected_text or "",
-            "urls": request.urls or [],
-        }
-        
-        output_data: Dict[str, Any] = {
-            "response_tokens": "",
-            "response_file": "",
-            "response_image": "",
-        }
-        
-        # Create task in database
-        user_task = await task_repo.create_user_task(
-            task_type=request.task_type,
-            user_guest_id=user_guest_id,
-            input_data=input_data,
-            user_contexts=context_ids,
-            output_data=output_data,
-        )
-        
-        # Commit task
-        await session.commit()
-        
-        return TaskResponse(
-            task_id=str(user_task.task_id),
-            task_type=request.task_type,
-            context_ids=[str(cid) for cid in context_ids],
-            context_result="",
-        )
-
-    # if request.task_type == TaskType.CREATE_ACTION_FROM_CONTEXT:
-    #     actions_result = await run_url_action_agent(context=context_result)
-
-    #     # Invoke Composio/Trello integration using the first task and its subtasks.
-    #     trello_metadata = ""
-    #     if actions_result:
-    #         try:
-    #             await create_trello_task_from_actions_result(actions_result)
-    #             trello_metadata = "Trello task created successfully"
-    #         except Exception as e:
-    #             trello_metadata = f"Trello task creation failed: {str(e)}"
-
-    #     # Prepare input data
-    #     input_data: Dict[str, Any] = {
-    #         "workflow_tools": request.workflow_tools or [],
-    #         "user_context": request.user_context or request.selected_text or "",
-    #     }
-
-    #     # Prepare output data
-    #     output_data: Dict[str, Any] = {
-    #         "response_tokens": str(actions_result) if actions_result else "",
-    #         "response_file": "",
-    #         "response_image": "",
-    #     }
-
-    #     # Create task in database
-    #     user_task = await task_repo.create_user_task(
-    #         task_type=request.task_type,
-    #         user_guest_id=user_guest_id,
-    #         input_data=input_data,
-    #         user_contexts=context_ids,
-    #         output_data=output_data,
-    #     )
-
-    #     # Commit task
-    #     await session.commit()
-
-    #     return TaskResponse(
-    #         task_id=str(user_task.task_id),
-    #         task_type=request.task_type,
-    #         context_ids=[str(cid) for cid in context_ids],
-    #         context_result= "",
-    #         actions_result=actions_result,
-    #         trello_metadata=trello_metadata,
-    #     )
-
-    # This should be unreachable due to the enum type, but kept as a safeguard.
-    raise HTTPException(
-        status_code=400, detail=f"Unsupported task_type: {request.task_type.value}"
+    # Pre-task context processing: run agent to extract tags, content, etc.
+    semantic_knowledge_service = SemanticKnowledgeService(
+        embedding_service=embedding_service,
+        context_repository=context_repo,
     )
+    try:
+        if request.urls:
+            context_result = await semantic_knowledge_service.process_context(
+                urls=request.urls
+            )
+        else:
+            combined = (
+                (request.selected_text or "").strip()
+                + "\n\n"
+                + (request.user_context or "").strip()
+            ).strip()
+            context_result = await semantic_knowledge_service.process_context(
+                context=combined if combined else "No content provided"
+            )
 
+        if context_result and context_result.get("contexts"):
+            for item in context_result["contexts"]:
+                raw_content = (
+                    item.get("content") or item.get("short_summary") or ""
+                )
+                tags = item.get("tags") or []
+                uc = await context_repo.create_user_context(
+                    raw_content=raw_content,
+                    context_tags=tags,
+                    user_guest_id=user_guest_id,
+                    url=item.get("url"),
+                    user_defined_context=item.get("short_summary")
+                    or item.get("title"),
+                    find_parent=True,
+                )
+                context_ids.append(uc.context_id)
+            await session.flush()
+        else:
+            context_result = None
+    except Exception as e:
+        print(f"Context processing failed: {e}")
+        context_result = None
+
+    # Fallback: create one minimal user context when processing failed or returned nothing
+    if not context_ids:
+        fallback_raw = (
+            (request.selected_text or "").strip()
+            + "\n\n"
+            + (request.user_context or "").strip()
+        ).strip()
+        if not fallback_raw:
+            fallback_raw = "User-provided context"
+        uc = await context_repo.create_user_context(
+            raw_content=fallback_raw,
+            context_tags=["user_input"],
+            user_guest_id=user_guest_id,
+            url=None,
+            user_defined_context=None,
+            find_parent=True,
+        )
+        context_ids.append(uc.context_id)
+        await session.flush()
+
+    # Pass through for intent/task input (same shape as before)
+    context = {
+        "user_task": request.user_context,
+        "urls": request.urls,
+        "selected_text": request.selected_text,
+    }
+
+    return await _execute_task(
+        request=request,
+        user_guest_id=user_guest_id,
+        session=session,
+        context_result=context,
+        context_ids=context_ids,
+        context_repo=context_repo,
+        task_repo=task_repo,
+    )
 
 @router.get("/tasks", response_model=TasksListResponse)
 async def get_tasks_list(
@@ -629,6 +540,65 @@ async def get_task_detail(
         ]
 
     return response
+
+
+@router.get("/tasks/{task_id}/excel")
+async def download_excel_file(
+    task_id: str,
+    user_guest_id: uuid.UUID = Depends(get_user_guest_id),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """
+    Download Excel file generated for a task.
+
+    Returns the Excel file if it exists in the task output.
+    """
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid task_id format")
+
+    task_repo = UserTaskRepository(session)
+    task = await task_repo.get_user_task(task_uuid)
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Verify ownership
+    if task.user_guest_id != user_guest_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Get Excel file path from output
+    output = task.output or {}
+    excel_file_path = output.get("excel_file_path")
+    
+    # Also check execution_result
+    if not excel_file_path and "execution_result" in output:
+        execution_result = output.get("execution_result", {})
+        if isinstance(execution_result, dict):
+            excel_file_path = execution_result.get("result", {}).get("excel_file_path")
+
+    if not excel_file_path:
+        raise HTTPException(
+            status_code=404, detail="No Excel file found for this task"
+        )
+
+    # Check if file exists
+    file_path = Path(excel_file_path)
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=404, detail="Excel file not found on server"
+        )
+
+    # Return file
+    return FileResponse(
+        path=str(file_path),
+        filename=file_path.name,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 __all__ = ["router", "TaskRequest", "TaskResponse"]

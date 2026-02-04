@@ -14,6 +14,8 @@ class Settings:
 
     # Database configuration
     DATABASE_URL: str = os.environ["DATABASE_URL"]
+    # Set to "require" (default) for cloud PostgreSQL; use "disable" for local dev without SSL
+    DATABASE_SSL: str = os.getenv("DATABASE_SSL", "require").lower()
 
     # OpenAI configuration
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")

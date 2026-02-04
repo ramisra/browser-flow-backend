@@ -1,0 +1,34 @@
+{
+  "agents": {
+    "data_extraction_agent": {
+      "agent_id": "data_extraction_agent",
+      "agent_class": "app.agents.data_extraction_agent.DataExtractionAgent",
+      "task_types": ["EXTRACT_DATA_TO_SHEET"],
+      "capabilities": ["data_extraction", "excel_writing", "text_parsing"],
+      "required_tools": ["mcp__excel__excel_write"],
+      "required_mcp_servers": ["excel"],
+      "use_composio_fallback": true,
+      "description": "Extracts structured data from text and writes to Excel files",
+      "config": {
+        "system_prompt": "You are a data extraction specialist focused on parsing unstructured text and creating structured Excel outputs."
+      }
+    },
+    "note_taking_agent": {
+      "agent_id": "note_taking_agent",
+      "agent_class": "app.agents.note_taking_agent.NoteTakingAgent",
+      "task_types": ["NOTE_TAKING", "CREATE_TODO", "EXTRACT_DATA_TABLE"],
+      "capabilities": ["note_taking", "notion", "content_creation"],
+      "required_tools": [
+        "mcp__notion__notion_create_page",
+        "mcp__notion__notion_append_blocks",
+        "mcp__notion__notion_search"
+      ],
+      "required_mcp_servers": ["notion"],
+      "use_composio_fallback": false,
+      "description": "Creates and manages notes in Notion",
+      "config": {
+        "system_prompt": "You are a note-taking assistant that creates and organizes notes in Notion."
+      }
+    }
+  }
+}

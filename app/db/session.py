@@ -1,6 +1,6 @@
 """Database session management."""
 
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -11,11 +11,17 @@ from sqlalchemy.orm import declarative_base
 
 from app.core.config import settings
 
+# SSL for PostgreSQL: required by most cloud providers (Neon, Supabase, RDS, etc.)
+_connect_args: dict[str, Any] = {}
+if settings.DATABASE_SSL in ("require", "true", "1"):
+    _connect_args["ssl"] = True
+
 # Create async engine
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,
     future=True,
+    connect_args=_connect_args,
 )
 
 # Create async session factory

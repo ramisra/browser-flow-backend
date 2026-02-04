@@ -4,8 +4,9 @@ from typing import Any, Dict, List, Optional
 
 # from app.core.composio_trello import create_trello_task_from_actions_result
 from app.core.tool_registry import ToolRegistry
-from app.core.url_context import run_url_context_agent
 from app.models.workflow_plan import ExecutionMode, StepStatus, WorkflowPlan, WorkflowStep
+from app.services.embedding import EmbeddingService
+from app.services.semantic_knowledge_service import SemanticKnowledgeService
 
 
 class TaskExecutor:
@@ -288,8 +289,8 @@ class TaskExecutor:
             }
 
         try:
-            # Use existing URL context agent
-            result = await run_url_context_agent(urls=[url])
+            sks = SemanticKnowledgeService(EmbeddingService(), None)
+            result = await sks.process_context(urls=[url])
             return {
                 "status": "success",
                 "url": url,
