@@ -40,9 +40,6 @@ class UserTask(Base):
     user_guest_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     user_contexts = Column(ARRAY(UUID(as_uuid=True)), nullable=False, default=list)
     timestamp = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    # New fields for intent-to-output orchestration
-    detected_intent = Column(JSONB, nullable=True, default=dict)
-    workflow_plan = Column(JSONB, nullable=True, default=dict)
     execution_status = Column(String, nullable=True, default="PENDING")
 
     def __repr__(self) -> str:

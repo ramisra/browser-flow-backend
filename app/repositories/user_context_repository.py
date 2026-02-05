@@ -80,8 +80,10 @@ class UserContextRepository:
                 self.session, context_tags, embedding_list, user_guest_id
             )
 
-        # Create context
+        # Create context. Set context_id explicitly so it is available before flush;
+        # Column default (uuid.uuid4) is only applied at INSERT time.
         user_context = UserContext(
+            context_id=uuid.uuid4(),
             context_tags=context_tags,
             raw_content=raw_content,
             user_defined_context=user_defined_context,

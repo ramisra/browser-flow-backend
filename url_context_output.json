@@ -1,12 +1,11 @@
 {
   "url": "provided_context",
-  "title": "Piotr P - Technical Leader at Allegro",
+  "title": "Database Cluster Configuration",
   "tags": [
-    "LinkedIn profile",
-    "professional networking",
-    "career profile",
-    "social media"
+    "documentation",
+    "database",
+    "technical reference"
   ],
-  "content": "Piotr P 3rd degree connection. Technical Leader at Allegro. Education: Lodz University of Technology. Location: Lodz Metropolitan Area. Contact info available. 500+ connections.",
-  "short_summary": "This is a LinkedIn profile for Piotr P, a Technical Leader at Allegro in the Lodz Metropolitan Area. The profile shows a 3rd degree connection with 500+ connections and education from Lodz University of Technology."
+  "content": "While creating a cluster, The DB cluster contains a primary writer DB instance and up to 15 reader DB instances (Read replica)",
+  "short_summary": "This content describes the structure of a database cluster configuration. It specifies that a DB cluster consists of one primary writer instance and can support up to 15 read replica instances."
 }

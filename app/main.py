@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from sqlalchemy import text
 
 from app.api.contexts import router as contexts_router
+from app.api.integrations import router as integrations_router
 from app.api.tasks import router as tasks_router
 from app.db.session import engine
 
@@ -37,6 +38,8 @@ def create_app() -> FastAPI:
     
     # Context endpoints
     app.include_router(contexts_router, prefix="/api")
+    # Integration tokens (e.g. Notion API key per user)
+    app.include_router(integrations_router, prefix="/api")
 
     @app.get("/health")
     async def health_check():

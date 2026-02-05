@@ -110,7 +110,7 @@ async def get_contexts_list(
     user_guest_id: uuid.UUID = Depends(get_user_guest_id),
     session: AsyncSession = Depends(get_async_session),
     page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(50, ge=1, le=100, description="Items per page"),
+    page_size: int = Query(50, ge=1, le=1000, description="Items per page"),
     context_type: Optional[ContextType] = Query(None, description="Filter by context type"),
     tags: Optional[str] = Query(None, description="Comma-separated tags to filter by"),
     search: Optional[str] = Query(None, description="Search in content and tags"),

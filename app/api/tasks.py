@@ -25,7 +25,12 @@ from app.services.task_orchestrator import TaskOrchestrator
 from app.services.semantic_knowledge_service import SemanticKnowledgeService
 from app.core.agent_registry import AgentRegistry
 from app.core.agents.agent_spawner import AgentSpawner
+from app.core.integration_types import NOTION
 from app.core.tools.excel_tools import ExcelTools
+from app.core.tools.notion_client import NotionClient
+from app.repositories.user_integration_token_repository import (
+    UserIntegrationTokenRepository,
+)
 
 
 class TaskRequest(BaseModel):
@@ -78,9 +83,6 @@ class TaskResponse(BaseModel):
     actions_result: Optional[Dict[str, Any]] = None
     trello_metadata: Optional[str] = None
     task_identification: Optional[TaskIdentificationResult] = None
-    # New fields for intent-to-output orchestration
-    detected_intent: Optional[Dict[str, Any]] = None
-    workflow_plan: Optional[Dict[str, Any]] = None
     execution_result: Optional[Dict[str, Any]] = None
     execution_status: Optional[str] = None
 
@@ -199,45 +201,59 @@ async def _execute_task(
     # NEW: Agent system initiation
     execution_result = None
     try:
-        # Initialize agent system components
-        agent_registry = AgentRegistry()
-        tool_registry = ToolRegistry()
-        embedding_service = EmbeddingService()
-        semantic_knowledge_service = SemanticKnowledgeService(
-            embedding_service=embedding_service,
-            context_repository=context_repo,
-        )
-        excel_tools = ExcelTools()
-        agent_spawner = AgentSpawner(
-            tool_registry=tool_registry,
-            embedding_service=None,
-            semantic_knowledge_service=semantic_knowledge_service,
-            excel_tools=excel_tools,
-        )
-        task_orchestrator = TaskOrchestrator(
-            agent_registry=agent_registry,
-            agent_spawner=agent_spawner,
-        )
+        # Only call agent system if task_type is not ADD_TO_KNOWLEDGE_BASE
+        if getattr(task_identification, "task_type", None) != "ADD_TO_KNOWLEDGE_BASE":
+            # Resolve user's Notion token (if any) for agent/spawner; else fall back to env
+            notion_token = None
+            try:
+                token_repo = UserIntegrationTokenRepository(session)
+                notion_token = await token_repo.get_token(user_guest_id, NOTION)
+            except Exception:
+                pass
+            notion_client = NotionClient(api_key=notion_token) if notion_token else None
 
-        # Prepare task input combining selected_text and user_context
-        task_input = {
-            "selected_text": request.selected_text,
-            "user_context": request.user_context or user_task_context,
-            "urls": request.urls or [],
-            "context_result": context_result,
-        }
+            # Initialize agent system components
+            agent_registry = AgentRegistry()
+            tool_registry = ToolRegistry()
+            embedding_service = EmbeddingService()
+            semantic_knowledge_service = SemanticKnowledgeService(
+                embedding_service=embedding_service,
+                context_repository=context_repo,
+            )
+            excel_tools = ExcelTools()
+            agent_spawner = AgentSpawner(
+                tool_registry=tool_registry,
+                embedding_service=None,
+                semantic_knowledge_service=semantic_knowledge_service,
+                excel_tools=excel_tools,
+                notion_client=notion_client,
+            )
+            task_orchestrator = TaskOrchestrator(
+                agent_registry=agent_registry,
+                agent_spawner=agent_spawner,
+            )
 
-        # Execute agent orchestration
-        execution_result = await task_orchestrator.orchestrate_task(
-            task_identification=task_identification,
-            user_context=user_task_context,
-            context_metadata=context_metadata,
-            context_result=context_result,
-            task_input=task_input,
-            user_guest_id=str(user_guest_id),
-            context_ids=[str(cid) for cid in context_ids],
-        )
-        print(f"Agent execution result: {execution_result}")
+            # Prepare task input combining selected_text and user_context
+            task_input = {
+                "selected_text": request.selected_text,
+                "user_context": request.user_context or user_task_context,
+                "urls": request.urls or [],
+                "context_result": context_result,
+            }
+
+            # Execute agent orchestration
+            execution_result = await task_orchestrator.orchestrate_task(
+                task_identification=task_identification,
+                user_context=user_task_context,
+                context_metadata=context_metadata,
+                context_result=context_result,
+                task_input=task_input,
+                user_guest_id=str(user_guest_id),
+                context_ids=[str(cid) for cid in context_ids],
+            )
+            print(f"Agent execution result: {execution_result}")
+        else:
+            print("Task type is ADD_TO_KNOWLEDGE_BASE, skipping agent execution.")
     except Exception as e:
         print(f"Error in agent orchestration: {e}")
         import traceback
@@ -248,7 +264,7 @@ async def _execute_task(
     task_type = task_identification.task_type
     
     output_data = (
-        execution_result.agent_results.model_dump()
+        execution_result.model_dump()
         if execution_result and hasattr(execution_result, "agent_results")
         else {}
     )
@@ -256,8 +272,8 @@ async def _execute_task(
     user_task = await task_repo.create_user_task(
         task_type=task_type,
         user_guest_id=user_guest_id,
-        input_data=task_identification.input.model_dump(),
-        user_contexts=context_ids,
+        input_data={"task_identification_input": task_identification.model_dump(), "context_input": context_result },
+        user_contexts=[str(cid) for cid in context_ids],
         output_data=output_data,
     )
 
@@ -285,12 +301,12 @@ async def _execute_task(
 
     # Prepare execution result for response
     execution_result_dict = {}
-    execution_status = "PENDING"
+    execution_status = "COMPLETED" if task_type == "ADD_TO_KNOWLEDGE_BASE" else "PENDING"
     if execution_result:
         execution_result_dict = execution_result.model_dump() if hasattr(execution_result, 'model_dump') else execution_result
         execution_status = execution_result.status if hasattr(execution_result, 'status') else "COMPLETED"
     return TaskResponse(
-        task_id=str(1),
+        task_id=str(user_task.task_id),
         task_type=task_type,
         context_ids=[str(cid) for cid in context_ids],
         context_result=context_result,
@@ -371,6 +387,7 @@ async def initiate_task(
                     find_parent=True,
                 )
                 context_ids.append(uc.context_id)
+                print(f"Setting Context id: {context_ids}")
             await session.flush()
         else:
             context_result = None
@@ -403,7 +420,9 @@ async def initiate_task(
         "user_task": request.user_context,
         "urls": request.urls,
         "selected_text": request.selected_text,
+        "processed_context": context_result,
     }
+    print(f"Context ids to flush: {context_ids}")
 
     return await _execute_task(
         request=request,

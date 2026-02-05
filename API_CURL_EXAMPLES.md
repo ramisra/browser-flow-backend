@@ -26,6 +26,109 @@ curl -X GET "http://localhost:8000/health"
 
 ---
 
+## Integrations API
+
+Manage per-user integration tokens (e.g. Notion API key). All token endpoints require the `X-User-Guest-ID` header.
+
+**Base**: `http://localhost:8000/api/integrations`
+
+### 1. List supported integrations (capabilities)
+
+#### GET /api/integrations/capabilities
+Returns integration tools that browser_flow supports. No auth required.
+
+```bash
+curl -X GET "http://localhost:8000/api/integrations/capabilities"
+```
+
+**Response:**
+```json
+{
+  "integrations": [
+    {
+      "id": "notion",
+      "name": "Notion",
+      "description": "Create and update pages, append blocks, and search in Notion."
+    }
+  ]
+}
+```
+
+---
+
+### 2. Save integration token
+
+#### POST /api/integrations/tokens
+Upsert a token for the user. Re-saving the same integration sets `is_deleted` to false. Requires `X-User-Guest-ID`.
+
+```bash
+curl -X POST "http://localhost:8000/api/integrations/tokens" \
+  -H "Content-Type: application/json" \
+  -H "X-User-Guest-ID: 550e8400-e29b-41d4-a716-446655440000" \
+  -d '{
+    "integration_tool": "notion",
+    "api_key": "your-notion-integration-secret"
+  }'
+```
+
+**Response:**
+```json
+{
+  "integration_tool": "notion",
+  "created_at": "2024-01-04T12:00:00Z",
+  "updated_at": "2024-01-04T12:00:00Z"
+}
+```
+
+---
+
+### 3. List user's integration tokens
+
+#### GET /api/integrations/tokens
+List active integrations for the user (deleted ones are excluded). Does not return `api_key`. Requires `X-User-Guest-ID`.
+
+```bash
+curl -X GET "http://localhost:8000/api/integrations/tokens" \
+  -H "X-User-Guest-ID: 550e8400-e29b-41d4-a716-446655440000"
+```
+
+**Response:**
+```json
+{
+  "tokens": [
+    {
+      "integration_tool": "notion",
+      "created_at": "2024-01-04T12:00:00Z",
+      "updated_at": "2024-01-04T12:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### 4. Delete integration token (soft delete)
+
+#### DELETE /api/integrations/tokens/{integration_tool}
+Marks the integration as deleted for the user (`is_deleted=true`). It will no longer appear in the list or be used for tasks. Requires `X-User-Guest-ID`.
+
+```bash
+curl -X DELETE "http://localhost:8000/api/integrations/tokens/notion" \
+  -H "X-User-Guest-ID: 550e8400-e29b-41d4-a716-446655440000"
+```
+
+**Response:**
+```json
+{
+  "status": "deleted",
+  "integration_tool": "notion"
+}
+```
+
+**404** if no active token exists for that user and integration.
+
+---
+
 ## Tasks API
 
 ### 1. Create/Initiate a Task

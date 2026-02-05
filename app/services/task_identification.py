@@ -27,12 +27,14 @@ class TaskIdentificationService:
         Returns:
             TaskIdentificationResult with task type and confidence
         """
-        context_info = user_context
+        context_info = user_context or ""
         if context_metadata:
-            if "urls" in context_metadata:
-                context_info += f"\n\nURLs: {', '.join(context_metadata['urls'])}"
-            if "tags" in context_metadata:
-                context_info += f"\n\nTags: {', '.join(context_metadata['tags'])}"
+            urls = context_metadata.get("urls")
+            if urls:
+                context_info += f"\n\nURLs: {', '.join(str(u) for u in urls)}"
+            tags = context_metadata.get("tags")
+            if tags:
+                context_info += f"\n\nTags: {', '.join(str(t) for t in tags)}"
 
         task_types_list = "\n".join([f"- {t.value}" for t in TaskType])
         print(f"Task types list: {task_types_list}")

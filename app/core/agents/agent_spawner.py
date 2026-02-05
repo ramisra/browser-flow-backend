@@ -49,7 +49,7 @@ class AgentSpawner:
         self.notion_client = notion_client
         self.mcp_servers_pool = {
             "excel": create_excel_mcp_server(self.excel_tools),
-            "notion": create_notion_mcp_server(),
+            "notion": create_notion_mcp_server(self.notion_client or NotionClient()),
         }
 
     def _get_missing_tools(
