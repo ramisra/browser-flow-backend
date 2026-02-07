@@ -27,7 +27,9 @@ class Settings:
     # Opik configuration
     OPIK_ENABLED: bool = os.getenv("OPIK_ENABLED", "false").lower() == "true"
     OPIK_BASE_URL: Optional[str] = os.getenv("OPIK_BASE_URL")
+    OPIK_URL_OVERRIDE: Optional[str] = os.getenv("OPIK_URL_OVERRIDE") or OPIK_BASE_URL
     OPIK_PROJECT_NAME: Optional[str] = os.getenv("OPIK_PROJECT_NAME")
+    OPIK_WORKSPACE: Optional[str] = os.getenv("OPIK_WORKSPACE")
     OPIK_API_KEY: Optional[str] = os.getenv("OPIK_API_KEY")
 
     @property

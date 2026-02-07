@@ -18,10 +18,16 @@ async def lifespan(app: FastAPI):
     if settings.OPIK_ENABLED:
         import opik
 
-        configure_kwargs = {"use_local": False}
+        configure_kwargs = {"use_local": False, "automatic_approvals": True}
     
         if settings.OPIK_API_KEY:
             configure_kwargs["api_key"] = settings.OPIK_API_KEY
+
+        if settings.OPIK_WORKSPACE:
+            configure_kwargs["workspace"] = settings.OPIK_WORKSPACE
+
+        if settings.OPIK_URL_OVERRIDE:
+            configure_kwargs["url"] = settings.OPIK_URL_OVERRIDE
 
         opik.configure(**configure_kwargs)
 
