@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from opik import track
+
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
@@ -15,6 +17,7 @@ from claude_agent_sdk import (
 
 from app.core.agents.agent_context import AgentContext
 from app.services.embedding import EmbeddingService
+from app.utils.opik_wrapper import store_prompt
 
 if TYPE_CHECKING:
     from app.repositories.user_context_repository import UserContextRepository
@@ -116,10 +119,12 @@ class SemanticKnowledgeService:
 
         return agent_context
 
+    @track
     async def process_context(
         self,
         urls: Optional[List[str]] = None,
         context: Optional[str] = None,
+        caller: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Process context or URLs with Claude to extract tags, content, and metadata.
 
@@ -199,6 +204,32 @@ Here are the URLs:
             )
         else:
             raise ValueError("Either urls or context must be provided")
+
+        caller_name = (
+            caller.strip()
+            if isinstance(caller, str) and caller.strip()
+            else self.__class__.__name__
+        )
+        store_prompt(
+            name=f"SemanticKnowledgeService_process_context_system_prompt",
+            prompt=system_prompt,
+            metadata={
+                "component": "SemanticKnowledgeService",
+                "method": "process_context",
+                "kind": "system_prompt"
+            },
+        )
+        store_prompt(
+            name=f"SemanticKnowledgeService_process_context_full_prompt",
+            prompt=prompt,
+            metadata={
+                "component": "SemanticKnowledgeService",
+                "method": "process_context",
+                "kind": "full_prompt",
+                "has_urls": bool(urls),
+                "has_context": bool(context),
+            },
+        )
 
         context_output_path = Path("url_context_output.json")
 

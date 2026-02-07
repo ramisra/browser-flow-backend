@@ -11,7 +11,7 @@ from app.core.agents.reasoning_engine import ReasoningEngine
 from app.core.agents.tool_integration import ToolIntegration
 from app.core.tools.excel_tools import ExcelTools
 from app.models.agent_result import AgentResult
-
+from opik import track
 
 class DataExtractionAgent(BaseAgent):
     """Agent for extracting structured data and writing to Excel."""
@@ -204,7 +204,8 @@ Text to parse:
             normalized_row = {col: row.get(col, "") for col in columns}
             normalized_data.append(normalized_row)
         return normalized_data
-
+        
+    @track
     async def execute(
         self, task_input: Dict[str, Any], agent_context: Optional[AgentContext] = None
     ) -> AgentResult:

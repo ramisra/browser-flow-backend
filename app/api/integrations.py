@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.integration_types import (
     get_capabilities,
+    integration_requires_api_key,
     is_supported_integration,
     normalize_integration_tool,
 )
@@ -25,6 +26,7 @@ class IntegrationCapability(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
+    requires_api_key: bool = True
 
 
 class CapabilitiesResponse(BaseModel):
@@ -34,10 +36,10 @@ class CapabilitiesResponse(BaseModel):
 
 
 class SaveTokenRequest(BaseModel):
-    """Body for POST /integrations/tokens."""
+    """Body for POST /integrations/tokens. api_key optional for integrations that don't require it (e.g. Excel)."""
 
     integration_tool: str
-    api_key: str
+    api_key: Optional[str] = None
     integration_metadata: Optional[Dict[str, Any]] = None
 
 
@@ -97,12 +99,14 @@ async def require_user_guest_id(
 async def get_capabilities_list() -> CapabilitiesResponse:
     """List integration tools that browser_flow supports (e.g. Notion)."""
     caps = get_capabilities()
+    print(caps)
     return CapabilitiesResponse(
         integrations=[
             IntegrationCapability(
                 id=c["id"],
                 name=c["name"],
                 description=c.get("description"),
+                requires_api_key=c.get("requires_api_key", True),
             )
             for c in caps
         ]
@@ -121,17 +125,19 @@ async def save_token(
             status_code=400,
             detail=f"Unsupported integration_tool: {body.integration_tool}",
         )
-    if not (body.api_key or "").strip():
+    canonical = normalize_integration_tool(body.integration_tool)
+    if integration_requires_api_key(canonical) and not (body.api_key or "").strip():
         raise HTTPException(
             status_code=400,
-            detail="api_key is required and cannot be empty",
+            detail="api_key is required for this integration and cannot be empty",
         )
-    canonical = normalize_integration_tool(body.integration_tool)
+    # Integrations that don't require a key (e.g. Excel) store empty string
+    api_key_value = (body.api_key or "").strip() if integration_requires_api_key(canonical) else ""
     repo = UserIntegrationTokenRepository(session)
     token_row = await repo.upsert_token(
         user_guest_id=user_guest_id,
         integration_tool=canonical,
-        api_key=body.api_key.strip(),
+        api_key=api_key_value or (body.api_key or "").strip(),
         integration_metadata=body.integration_metadata,
     )
     await session.commit()

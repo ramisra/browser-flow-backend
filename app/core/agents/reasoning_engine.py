@@ -1,7 +1,8 @@
 """Reasoning engine component using Claude SDK."""
 
 from typing import Any, Dict, List, Optional
-
+from opik import track
+from app.utils.opik_wrapper import store_prompt
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
@@ -31,7 +32,10 @@ class ReasoningEngine:
         self.model = model
         self.system_prompt = system_prompt
         self.api_key = api_key
-
+        self._opik_logged_system_prompts: set[str] = set()
+        
+    
+    @track
     async def reason(
         self,
         prompt: str,
@@ -39,6 +43,7 @@ class ReasoningEngine:
         tools: Optional[List[str]] = None,
         mcp_servers: Optional[Dict[str, Any]] = None,
         max_tokens: int = 4096,
+        caller: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Perform reasoning with Claude.
 
@@ -58,6 +63,42 @@ class ReasoningEngine:
                 f"{k}: {v}" for k, v in context.items()
             )
             full_prompt = f"{prompt}\n\nContext:\n{context_str}"
+
+        # Store prompts in Opik (best-effort)
+        caller_name = (
+            caller.strip()
+            if isinstance(caller, str) and caller.strip()
+            else "UnknownCaller"
+        )
+        system_prompt_name = (
+            f"{caller_name}_ReasoningEngine_system_prompt"
+        )
+        full_prompt_name = f"{caller_name}_ReasoningEngine_full_prompt"
+
+        if self.system_prompt and system_prompt_name not in self._opik_logged_system_prompts:
+            store_prompt(
+                name=system_prompt_name,
+                prompt=self.system_prompt,
+                metadata={
+                    "component": "ReasoningEngine",
+                    "kind": "system_prompt",
+                    "caller": caller_name,
+                },
+            )
+            self._opik_logged_system_prompts.add(system_prompt_name)
+        store_prompt(
+            name=full_prompt_name,
+            prompt=full_prompt,
+            metadata={
+                "component": "ReasoningEngine",
+                "kind": "reason",
+                "model": self.model,
+                "caller": caller_name,
+                "has_context": bool(context),
+                "has_tools": bool(tools),
+                "has_mcp_servers": bool(mcp_servers),
+            },
+        )
 
         # Configure Claude agent options (SDK does not accept model/max_tokens in __init__)
         options = ClaudeAgentOptions(
@@ -160,11 +201,13 @@ class ReasoningEngine:
             return "\n".join(text_parts)
         return str(message.content)
 
+    @track
     async def reason_with_json_output(
         self,
         prompt: str,
         context: Optional[Dict[str, Any]] = None,
         schema: Optional[Dict[str, Any]] = None,
+        caller: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Perform reasoning and return structured JSON output.
 
@@ -185,7 +228,25 @@ class ReasoningEngine:
                 f"{json_prompt}\n\nExpected JSON schema:\n{schema_str}"
             )
 
-        result = await self.reason(json_prompt, context)
+        caller_name = (
+            caller.strip()
+            if isinstance(caller, str) and caller.strip()
+            else "UnknownCaller"
+        )
+        store_prompt(
+            name=f"{caller_name}_ReasoningEngine_json_prompt",
+            prompt=json_prompt,
+            metadata={
+                "component": "ReasoningEngine",
+                "kind": "reason_with_json_output",
+                "model": self.model,
+                "caller": caller_name,
+                "has_context": bool(context),
+                "has_schema": bool(schema),
+            },
+        )
+
+        result = await self.reason(json_prompt, context, caller=caller_name)
 
         if result.get("error"):
             return result

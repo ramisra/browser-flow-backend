@@ -1,11 +1,12 @@
 {
   "url": "provided_context",
-  "title": "Database Cluster Configuration",
+  "title": "Sobha Realty Concludes FY 2025 with AED 30 Billion in Sales, Marking 30% Growth Over 2024",
   "tags": [
-    "documentation",
-    "database",
-    "technical reference"
+    "news",
+    "real estate",
+    "financial report",
+    "corporate announcement"
   ],
-  "content": "While creating a cluster, The DB cluster contains a primary writer DB instance and up to 15 reader DB instances (Read replica)",
-  "short_summary": "This content describes the structure of a database cluster configuration. It specifies that a DB cluster consists of one primary writer instance and can support up to 15 read replica instances."
+  "content": "Sobha Realty Concludes FY 2025 with AED 30 Billion in Sales, Marking 30% Growth Over 2024",
+  "short_summary": "Sobha Realty reported strong financial performance for fiscal year 2025, achieving AED 30 billion in sales. This represents a 30% increase compared to the previous year (2024), demonstrating significant growth in the company's real estate business."
 }

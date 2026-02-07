@@ -24,6 +24,12 @@ class Settings:
     # Application configuration
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
 
+    # Opik configuration
+    OPIK_ENABLED: bool = os.getenv("OPIK_ENABLED", "false").lower() == "true"
+    OPIK_BASE_URL: Optional[str] = os.getenv("OPIK_BASE_URL")
+    OPIK_PROJECT_NAME: Optional[str] = os.getenv("OPIK_PROJECT_NAME")
+    OPIK_API_KEY: Optional[str] = os.getenv("OPIK_API_KEY")
+
     @property
     def database_url_sync(self) -> str:
         """Get synchronous database URL for Alembic."""

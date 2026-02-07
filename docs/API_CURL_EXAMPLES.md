@@ -48,7 +48,14 @@ curl -X GET "http://localhost:8000/api/integrations/capabilities"
     {
       "id": "notion",
       "name": "Notion",
-      "description": "Create and update pages, append blocks, and search in Notion."
+      "description": "Create and update pages, append blocks, and search in Notion.",
+      "requires_api_key": true
+    },
+    {
+      "id": "excel",
+      "name": "Excel",
+      "description": "Extract data to Excel sheets and manage spreadsheets. No API key required.",
+      "requires_api_key": false
     }
   ]
 }
@@ -59,8 +66,9 @@ curl -X GET "http://localhost:8000/api/integrations/capabilities"
 ### 2. Save integration token
 
 #### POST /api/integrations/tokens
-Upsert a token for the user. Re-saving the same integration sets `is_deleted` to false. Requires `X-User-Guest-ID`.
+Upsert a token for the user. Re-saving the same integration sets `is_deleted` to false. Requires `X-User-Guest-ID`. For integrations with `requires_api_key: false` (e.g. Excel), `api_key` can be omitted.
 
+**Notion (requires api_key):**
 ```bash
 curl -X POST "http://localhost:8000/api/integrations/tokens" \
   -H "Content-Type: application/json" \
@@ -69,6 +77,14 @@ curl -X POST "http://localhost:8000/api/integrations/tokens" \
     "integration_tool": "notion",
     "api_key": "your-notion-integration-secret"
   }'
+```
+
+**Excel (no api_key required):**
+```bash
+curl -X POST "http://localhost:8000/api/integrations/tokens" \
+  -H "Content-Type: application/json" \
+  -H "X-User-Guest-ID: 550e8400-e29b-41d4-a716-446655440000" \
+  -d '{"integration_tool": "excel"}'
 ```
 
 **Response:**
@@ -506,6 +522,21 @@ curl -X GET "http://localhost:8000/api/contexts/789e4567-e89b-12d3-a456-42661417
     }
   ]
 }
+```
+
+---
+
+## Files API
+
+### 1. Download Excel file by path
+
+#### GET /api/files/excel/{file_path}
+Download an Excel file stored under the server's Excel storage directory. The `file_path` is relative to the storage root and must be URL-encoded if it contains spaces.
+
+```bash
+curl -X GET "http://localhost:8000/api/files/excel/Lead%20Tracking.xlsx" \
+  -H "X-User-Guest-ID: 550e8400-e29b-41d4-a716-446655440000" \
+  -o "Lead Tracking.xlsx"
 ```
 
 ---

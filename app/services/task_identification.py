@@ -3,6 +3,7 @@
 import json
 from typing import Any, Dict, List, Optional
 
+from opik import track
 from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, query
 
 from app.core.task_types import TaskType
@@ -10,13 +11,18 @@ from app.models.task_identification import (
     TaskIdentificationMetadata,
     TaskIdentificationResult,
 )
+from app.utils.opik_wrapper import store_prompt
 
 
 class TaskIdentificationService:
     """Service for identifying task type from user context."""
 
+    @track
     async def identify_task_type(
-        self, user_context: str, context_metadata: Optional[Dict[str, Any]] = None
+        self,
+        user_context: str,
+        context_metadata: Optional[Dict[str, Any]] = None,
+        caller: Optional[str] = None,
     ) -> TaskIdentificationResult:
         """Analyze user context and map it to a TaskType.
 
@@ -78,6 +84,38 @@ For OUTPUT: Describe what the task should produce or return. Use clear, descript
 
 """
 
+        system_prompt = (
+            "You identify task types accurately from context and return "
+            "valid JSON responses matching the requested schema. "
+            "Always extract structured input parameters and expected output "
+            "from the user context as dictionary objects with clear key-value pairs."
+        )
+
+        # caller_name = (
+        #     caller.strip()
+        #     if isinstance(caller, str) and caller.strip()
+        #     else self.__class__.__name__
+        # )
+        store_prompt(
+            name=f"TaskIdentificationService_identify_task_type_system_prompt",
+            prompt=system_prompt,
+            metadata={
+                "component": "TaskIdentificationService",
+                "method": "identify_task_type",
+                "kind": "system_prompt"
+            },
+        )
+        store_prompt(
+            name=f"TaskIdentificationService_identify_task_type_full_prompt",
+            prompt=prompt,
+            metadata={
+                "component": "TaskIdentificationService",
+                "method": "identify_task_type",
+                "kind": "full_prompt",
+                "has_context_metadata": bool(context_metadata),
+            },
+        )
+
         final_result: Optional[Dict[str, Any]] = None
         raw_response: Optional[Dict[str, Any]] = None
         accumulated_content: str = ""
@@ -87,12 +125,7 @@ For OUTPUT: Describe what the task should produce or return. Use clear, descript
             options=ClaudeAgentOptions(
                 allowed_tools=["Read", "Edit", "Glob"],
                 permission_mode="acceptEdits",
-                system_prompt=(
-                    "You identify task types accurately from context and return "
-                    "valid JSON responses matching the requested schema. "
-                    "Always extract structured input parameters and expected output "
-                    "from the user context as dictionary objects with clear key-value pairs."
-                ),
+                system_prompt=system_prompt,
             ),
         ):
             print(f"Message: {message}")

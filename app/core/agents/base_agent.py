@@ -82,7 +82,11 @@ class BaseAgent:
             Reasoning result dictionary
         """
         return await self.reasoning_engine.reason(
-            prompt, context, tools, mcp_servers
+            prompt,
+            context,
+            tools,
+            mcp_servers,
+            caller=self.__class__.__name__,
         )
 
     async def use_tool(
